@@ -63,19 +63,30 @@ def fetch_pr(pr_url: str) -> PullRequest:
     owner, repo, number = parse_pr_url(pr_url)
     base = f"{API}/repos/{owner}/{repo}/pulls/{number}"
 
+    import time
+
+    def _get_with_retry(client, url, headers):
+        for attempt in range(4):
+            try:
+                resp = client.get(url, headers=headers)
+                resp.raise_for_status()
+                return resp
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code in (500, 502, 503, 504) and attempt < 3:
+                    time.sleep(1.5)
+                    continue
+                raise
+
     with httpx.Client(timeout=30.0) as client:
-        meta_resp = client.get(base, headers=_headers())
-        meta_resp.raise_for_status()
+        meta_resp = _get_with_retry(client, base, _headers())
         meta = meta_resp.json()
 
-        diff_resp = client.get(
-            base, headers=_headers(accept="application/vnd.github.v3.diff")
+        diff_resp = _get_with_retry(
+            client, base, _headers(accept="application/vnd.github.v3.diff")
         )
-        diff_resp.raise_for_status()
         diff = diff_resp.text
 
-        files_resp = client.get(f"{base}/files", headers=_headers())
-        files_resp.raise_for_status()
+        files_resp = _get_with_retry(client, f"{base}/files", _headers())
         files = [f["filename"] for f in files_resp.json()]
 
     return PullRequest(
